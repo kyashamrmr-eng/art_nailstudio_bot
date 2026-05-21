@@ -7,8 +7,5 @@ build:
   requirementsPath: requirements.txt
   useCache: true
 run:
-  scriptName: null
   command: python bot.py
   persistenceMount: /data
-  containerPort: "80"
-  servicePort: "80"

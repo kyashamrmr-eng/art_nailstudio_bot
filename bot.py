@@ -1,10 +1,12 @@
 import asyncio
 import logging
+import re
 import sqlite3
 from os import getenv
 from pathlib import Path
 from datetime import datetime, date, timedelta
 
+from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -17,13 +19,14 @@ from aiogram.types import (
     FSInputFile,
 )
 
+load_dotenv()
 
 TOKEN = getenv("BOT_TOKEN")
 MANAGER_CHAT_ID = 6430611356
 
 BASE_DIR = Path(__file__).resolve().parent
 IMAGES_DIR = BASE_DIR / "images"
-DB_PATH = BASE_DIR / "bookings.db"
+DB_PATH = Path(getenv("DB_PATH", str(BASE_DIR / "bookings.db")))
 
 BANNER_IMAGE = IMAGES_DIR / "banner.jpg"
 ABOUT_IMAGE = IMAGES_DIR / "about.jpg"
@@ -212,11 +215,20 @@ def delete_booking_by_id(booking_id: int):
 
 
 def get_free_times(selected_date_text: str) -> list[str]:
-    return [
-        time_text
-        for time_text in WORKING_TIMES
-        if not is_slot_booked(selected_date_text, time_text)
-    ]
+    today = date.today()
+    now = datetime.now()
+    selected_date = datetime.strptime(selected_date_text, "%d.%m.%Y").date()
+
+    result = []
+    for time_text in WORKING_TIMES:
+        if is_slot_booked(selected_date_text, time_text):
+            continue
+        if selected_date == today:
+            slot_dt = datetime.strptime(f"{selected_date_text} {time_text}", "%d.%m.%Y %H:%M")
+            if slot_dt <= now:
+                continue
+        result.append(time_text)
+    return result
 
 
 def get_nearest_booking_for_user(user_id: int):
@@ -327,6 +339,36 @@ def build_times_keyboard(free_times: list[str]) -> ReplyKeyboardMarkup:
     keyboard.append([KeyboardButton(text="Отмена")])
 
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+
+def build_date_keyboard(page: int) -> tuple[ReplyKeyboardMarkup, int]:
+    today = date.today()
+    available_dates = []
+    for i in range(15):
+        d = today + timedelta(days=i)
+        if get_free_times(d.strftime("%d.%m.%Y")):
+            available_dates.append(d)
+
+    page_size = 7
+    total_pages = max(1, (len(available_dates) + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+
+    page_dates = available_dates[page * page_size:(page + 1) * page_size]
+
+    keyboard = []
+    for i in range(0, len(page_dates), 2):
+        keyboard.append([KeyboardButton(text=d.strftime("%d.%m.%Y")) for d in page_dates[i:i + 2]])
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(KeyboardButton(text="<"))
+    if page < total_pages - 1:
+        nav_row.append(KeyboardButton(text=">"))
+    if nav_row:
+        keyboard.append(nav_row)
+
+    keyboard.append([KeyboardButton(text="Отмена")])
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True), total_pages
 
 
 def parse_booking_date(date_text: str) -> date | None:
@@ -573,38 +615,45 @@ async def choose_service_handler(message: Message, state: FSMContext):
         )
         return
 
-    await state.update_data(service=message.text)
+    await state.update_data(service=message.text, date_page=0)
     await state.set_state(BookingState.entering_date)
 
-    await message.answer(
-        "Введите дату записи в формате ДД.ММ.ГГГГ.\n\n"
-        "Например: 22.05.2026\n\n"
-        "Записаться можно в пределах ближайших 14 дней."
-    )
+    keyboard, _ = build_date_keyboard(0)
+    await message.answer("Выберите дату:", reply_markup=keyboard)
 
 
 @dp.message(BookingState.entering_date)
 async def enter_date_handler(message: Message, state: FSMContext):
+    data = await state.get_data()
+    current_page = data.get("date_page", 0)
+
+    if message.text in (">", "<"):
+        new_page = current_page + (1 if message.text == ">" else -1)
+        await state.update_data(date_page=new_page)
+        keyboard, _ = build_date_keyboard(new_page)
+        await message.answer("Выберите дату:", reply_markup=keyboard)
+        return
+
     selected_date = parse_booking_date(message.text.strip())
 
     if selected_date is None:
-        await message.answer("Неверный формат даты.\n\nВведите дату так: 22.05.2026")
+        keyboard, _ = build_date_keyboard(current_page)
+        await message.answer("Выберите дату кнопкой из списка.", reply_markup=keyboard)
         return
 
     is_available, error_text = is_date_available(selected_date)
 
     if not is_available:
-        await message.answer(error_text + "\n\nВведите другую дату в формате ДД.ММ.ГГГГ.")
+        keyboard, _ = build_date_keyboard(current_page)
+        await message.answer(error_text, reply_markup=keyboard)
         return
 
     selected_date_text = selected_date.strftime("%d.%m.%Y")
     free_times = get_free_times(selected_date_text)
 
     if not free_times:
-        await message.answer(
-            "На эту дату свободных окон нет.\n\n"
-            "Введите другую дату в формате ДД.ММ.ГГГГ."
-        )
+        keyboard, _ = build_date_keyboard(current_page)
+        await message.answer("На эту дату нет свободных окон.", reply_markup=keyboard)
         return
 
     await state.update_data(date=selected_date_text)
@@ -657,28 +706,22 @@ async def enter_name_handler(message: Message, state: FSMContext):
     await message.answer("Введите контактный номер телефона:")
 
 
+def is_valid_phone(phone: str) -> bool:
+    cleaned = re.sub(r'[\s\-\(\)]', '', phone)
+    return bool(re.fullmatch(r'8\d{10}', cleaned) or re.fullmatch(r'\+7\d{10}', cleaned))
+
+
 @dp.message(BookingState.entering_phone)
 async def enter_phone_handler(message: Message, state: FSMContext):
     phone = message.text.strip()
 
-    if len(phone) < 7:
-        await message.answer("Номер слишком короткий. Введите телефон ещё раз:")
+    if not is_valid_phone(phone):
+        await message.answer(
+            "Неверный формат номера телефона.\n\n"
+            "Введите номер в формате 8XXXXXXXXXX или +7XXXXXXXXXX.\n"
+            "Например: 89991234567 или +79991234567"
+        )
         return
-
-    if len(phone) > 20:
-        await message.answer("Номер слишком длинный. Введите телефон ещё раз:")
-        return
-
-    if contains_banned_words(phone):
-        await message.answer("Некорректный номер телефона.")
-        return
-
-    allowed_symbols = "+0123456789()- "
-
-    for char in phone:
-        if char not in allowed_symbols:
-            await message.answer("Телефон содержит недопустимые символы.")
-            return
 
     await state.update_data(phone=phone)
     data = await state.get_data()
