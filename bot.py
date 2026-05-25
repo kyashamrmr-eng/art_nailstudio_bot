@@ -21,7 +21,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, FSInputF
 load_dotenv()
 
 TOKEN = getenv("BOT_TOKEN")
-MANAGER_CHAT_ID = 6430611356
+ADMIN_ID = 6430611356
 
 BASE_DIR = Path(__file__).resolve().parent
 IMAGES_DIR = BASE_DIR / "images"
@@ -152,6 +152,28 @@ class AdminState(StatesGroup):
     info_photo   = State()
     info_confirm = State()
 
+    # Рассылка объявлений
+    broadcast_text    = State()
+    broadcast_media   = State()
+    broadcast_confirm = State()
+
+    # Поиск по клиенту
+    client_search_input = State()
+
+    # Блокировка клиентов
+    block_menu      = State()
+    block_input     = State()
+    block_confirm   = State()
+    blocked_list    = State()
+    unblock_confirm = State()
+
+    # Управление менеджерами (только для администратора)
+    managers_menu              = State()
+    manager_add_input          = State()
+    manager_deactivate_select  = State()
+    manager_deactivate_confirm = State()
+    manager_log_view           = State()
+
 
 # ─── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -199,10 +221,34 @@ review_comment_keyboard = ReplyKeyboardMarkup(keyboard=[
 ], resize_keyboard=True)
 
 admin_keyboard = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text="Мастера"),             KeyboardButton(text="Расписание салона")],
-    [KeyboardButton(text="Расписание записей")],
-    [KeyboardButton(text="Услуги"),              KeyboardButton(text="Информация о салоне")],
-    [KeyboardButton(text="Выйти из редактирования")],
+    [KeyboardButton(text="💁‍♀️Мастера"),           KeyboardButton(text="🗓️Расписание записей")],
+    [KeyboardButton(text="💅Услуги"),              KeyboardButton(text="📝Расписание салона")],
+    [KeyboardButton(text="📄О салоне"),            KeyboardButton(text="✏️Создать объявление")],
+    [KeyboardButton(text="🔍Поиск по клиенту"),   KeyboardButton(text="⛔Блок пользователя")],
+    [KeyboardButton(text="Выход из редактирования")],
+], resize_keyboard=True)
+
+admin_super_keyboard = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text="💁‍♀️Мастера"),           KeyboardButton(text="🗓️Расписание записей")],
+    [KeyboardButton(text="💅Услуги"),              KeyboardButton(text="📝Расписание салона")],
+    [KeyboardButton(text="📄О салоне"),            KeyboardButton(text="✏️Создать объявление")],
+    [KeyboardButton(text="🔍Поиск по клиенту"),   KeyboardButton(text="⛔Блок пользователя")],
+    [KeyboardButton(text="Менеджеры")],
+    [KeyboardButton(text="Уведомления")],
+    [KeyboardButton(text="Выход из редактирования")],
+], resize_keyboard=True)
+
+managers_menu_keyboard = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text="Добавить менеджера")],
+    [KeyboardButton(text="Список менеджеров")],
+    [KeyboardButton(text="Лог действий")],
+    [KeyboardButton(text="Назад")],
+], resize_keyboard=True)
+
+block_menu_keyboard = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text="Заблокировать клиента")],
+    [KeyboardButton(text="Заблокированные клиенты")],
+    [KeyboardButton(text="Назад")],
 ], resize_keyboard=True)
 
 svc_menu_keyboard = ReplyKeyboardMarkup(keyboard=[
@@ -231,9 +277,11 @@ keep_keyboard = ReplyKeyboardMarkup(keyboard=[
 ], resize_keyboard=True)
 
 admin_masters_keyboard = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text="Внести мастера"),  KeyboardButton(text="Смотреть оценку")],
-    [KeyboardButton(text="Деактивировать"),  KeyboardButton(text="Редактировать")],
-    [KeyboardButton(text="Список мастеров")],
+    [KeyboardButton(text="🟢Внести мастера"),
+     KeyboardButton(text="🟡Редактировать"),
+     KeyboardButton(text="🔴Удалить")],
+    [KeyboardButton(text="👯Список мастеров"),
+     KeyboardButton(text="⭐Смотреть оценку")],
     [KeyboardButton(text="Назад")],
 ], resize_keyboard=True)
 
@@ -274,6 +322,16 @@ schedule_period_keyboard = ReplyKeyboardMarkup(keyboard=[
 ], resize_keyboard=True)
 
 back_keyboard = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Назад")]], resize_keyboard=True)
+
+broadcast_media_keyboard = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text="Без медиафайла")],
+    [KeyboardButton(text="Назад")],
+], resize_keyboard=True)
+
+reengagement_promo_keyboard = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="Записаться")]],
+    resize_keyboard=True,
+)
 
 
 # ─── Google Sheets ─────────────────────────────────────────────────────────────
@@ -396,6 +454,47 @@ def init_db():
             section TEXT PRIMARY KEY,
             text TEXT,
             photo_file_id TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS reengagement_log (
+            user_id INTEGER PRIMARY KEY,
+            sent_at TEXT NOT NULL)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS blocked_clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            phone TEXT,
+            name TEXT,
+            blocked_at TEXT NOT NULL)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS cancelled_bookings (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            master_id INTEGER NOT NULL,
+            master_name TEXT NOT NULL,
+            service TEXT NOT NULL,
+            date TEXT NOT NULL,
+            time TEXT NOT NULL,
+            duration INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            cancelled_at TEXT NOT NULL,
+            cancel_reason TEXT NOT NULL)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS managers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            added_at TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS admin_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS manager_action_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            manager_id INTEGER NOT NULL,
+            manager_name TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT,
+            logged_at TEXT NOT NULL)""")
 
         # Seed services if empty
         if not c.execute("SELECT COUNT(*) FROM services").fetchone()[0]:
@@ -791,6 +890,283 @@ def mark_review_sent(bid: int):
         conn.execute("UPDATE bookings SET review_sent=1 WHERE id=?", (bid,))
         conn.commit()
 
+def mark_reengagement_sent(user_id: int):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO reengagement_log (user_id, sent_at) VALUES (?, ?)",
+            (user_id, datetime.now().strftime("%d.%m.%Y %H:%M")),
+        )
+        conn.commit()
+
+# ─── Roles ────────────────────────────────────────────────────────────────────
+
+def is_admin(user_id: int) -> bool:
+    return user_id == ADMIN_ID
+
+def get_active_manager_ids() -> list[int]:
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT user_id FROM managers WHERE is_active=1"
+        ).fetchall()
+    return [r[0] for r in rows]
+
+def is_manager(user_id: int) -> bool:
+    return user_id in get_active_manager_ids()
+
+def is_manager_or_admin(user_id: int) -> bool:
+    return is_admin(user_id) or is_manager(user_id)
+
+def admin_kb(user_id: int) -> ReplyKeyboardMarkup:
+    return admin_super_keyboard if is_admin(user_id) else admin_keyboard
+
+def add_manager(user_id: int, name: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO managers (user_id, name, added_at, is_active) VALUES (?,?,?,1)",
+            (user_id, name, datetime.now().strftime("%d.%m.%Y %H:%M")),
+        )
+
+def deactivate_manager(manager_id: int):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE managers SET is_active=0 WHERE id=?", (manager_id,))
+
+def get_all_managers() -> list[dict]:
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, name, is_active FROM managers ORDER BY id"
+        ).fetchall()
+    return [{"id": r[0], "user_id": r[1], "name": r[2], "is_active": r[3]} for r in rows]
+
+def get_notifications_enabled() -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT value FROM admin_settings WHERE key='notifications'"
+        ).fetchone()
+    return row[0] == "1" if row else True
+
+def toggle_notifications() -> bool:
+    current = get_notifications_enabled()
+    new_val = not current
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO admin_settings (key, value) VALUES ('notifications', ?)",
+            ("1" if new_val else "0",),
+        )
+    return new_val
+
+def log_action(manager_id: int, manager_name: str, action: str, details: str = ""):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO manager_action_log (manager_id, manager_name, action, details, logged_at) VALUES (?,?,?,?,?)",
+            (manager_id, manager_name, action, details, datetime.now().strftime("%d.%m.%Y %H:%M")),
+        )
+
+def get_action_log(limit: int = 50) -> list[dict]:
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT manager_id, manager_name, action, details, logged_at FROM manager_action_log ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [{"manager_id": r[0], "manager_name": r[1], "action": r[2], "details": r[3], "logged_at": r[4]} for r in rows]
+
+
+# ─── Client blocking ───────────────────────────────────────────────────────────
+
+def is_client_blocked(user_id: int, username: str | None) -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        if username:
+            row = conn.execute(
+                "SELECT 1 FROM blocked_clients WHERE user_id=? OR username=?",
+                (user_id, username),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT 1 FROM blocked_clients WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+    return row is not None
+
+def get_client_identity(query: str) -> dict | None:
+    q = query.strip()
+    by_username = False
+    uname_val   = None
+    p7 = p8     = None
+
+    if q.startswith("@"):
+        by_username = True
+        uname_val   = q[1:]
+    elif is_valid_phone(q):
+        p7, p8 = phone_variants(q)
+    else:
+        by_username = True
+        uname_val   = q
+
+    with sqlite3.connect(DB_PATH) as conn:
+        if by_username:
+            row = conn.execute(
+                "SELECT user_id, username, phone, name FROM bookings WHERE username=? LIMIT 1",
+                (uname_val,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT user_id, username, phone, name FROM bookings WHERE phone IN (?,?) LIMIT 1",
+                (p7, p8),
+            ).fetchone()
+
+    if not row:
+        return None
+    return {"user_id": row[0], "username": row[1], "phone": row[2], "name": row[3]}
+
+def block_client(user_id: int | None, username: str | None, phone: str | None, name: str | None):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO blocked_clients (user_id, username, phone, name, blocked_at) VALUES (?,?,?,?,?)",
+            (user_id, username, phone, name, datetime.now().strftime("%d.%m.%Y %H:%M")),
+        )
+        conn.commit()
+
+def unblock_client(block_id: int):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM blocked_clients WHERE id=?", (block_id,))
+        conn.commit()
+
+def get_blocked_clients() -> list[dict]:
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, username, phone, name, blocked_at FROM blocked_clients ORDER BY blocked_at DESC"
+        ).fetchall()
+    return [{"id": r[0], "user_id": r[1], "username": r[2], "phone": r[3],
+             "name": r[4], "blocked_at": r[5]} for r in rows]
+
+def archive_cancelled_booking(bid: int, reason: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("""
+            SELECT b.id, b.user_id, b.username, b.master_id,
+                   COALESCE(m.name, 'Неизвестно'), b.service, b.date, b.time,
+                   b.duration, b.name, b.phone, b.created_at
+            FROM bookings b LEFT JOIN masters m ON b.master_id = m.id
+            WHERE b.id = ?
+        """, (bid,)).fetchone()
+        if not row:
+            return
+        conn.execute("""
+            INSERT OR IGNORE INTO cancelled_bookings
+            (id, user_id, username, master_id, master_name, service, date, time,
+             duration, name, phone, created_at, cancelled_at, cancel_reason)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (*row, datetime.now().strftime("%d.%m.%Y %H:%M"), reason))
+        conn.commit()
+
+def get_client_history(query: str) -> dict | None:
+    q = query.strip()
+    by_username = False
+    uname_val   = None
+    p7 = p8     = None
+
+    if q.startswith("@"):
+        by_username = True
+        uname_val   = q[1:]
+    elif is_valid_phone(q):
+        p7, p8 = phone_variants(q)
+    else:
+        by_username = True
+        uname_val   = q
+
+    with sqlite3.connect(DB_PATH) as conn:
+        if by_username:
+            active_rows = conn.execute("""
+                SELECT b.id, b.service, b.date, b.time, b.name, b.phone,
+                       COALESCE(m.name,'Неизвестно'), b.duration
+                FROM bookings b LEFT JOIN masters m ON b.master_id=m.id
+                WHERE b.username=? ORDER BY b.date, b.time
+            """, (uname_val,)).fetchall()
+            cancelled_rows = conn.execute("""
+                SELECT id, service, date, time, name, phone, master_name, duration,
+                       cancelled_at, cancel_reason
+                FROM cancelled_bookings WHERE username=?
+                ORDER BY date DESC, time DESC
+            """, (uname_val,)).fetchall()
+        else:
+            active_rows = conn.execute("""
+                SELECT b.id, b.service, b.date, b.time, b.name, b.phone,
+                       COALESCE(m.name,'Неизвестно'), b.duration
+                FROM bookings b LEFT JOIN masters m ON b.master_id=m.id
+                WHERE b.phone IN (?,?) ORDER BY b.date, b.time
+            """, (p7, p8)).fetchall()
+            cancelled_rows = conn.execute("""
+                SELECT id, service, date, time, name, phone, master_name, duration,
+                       cancelled_at, cancel_reason
+                FROM cancelled_bookings WHERE phone IN (?,?)
+                ORDER BY date DESC, time DESC
+            """, (p7, p8)).fetchall()
+
+    if not active_rows and not cancelled_rows:
+        return None
+
+    def _to_active(r):
+        return {"id": r[0], "service": r[1], "date": r[2], "time": r[3],
+                "name": r[4], "phone": r[5], "master_name": r[6], "duration": r[7]}
+
+    def _to_cancelled(r):
+        return {"id": r[0], "service": r[1], "date": r[2], "time": r[3],
+                "name": r[4], "phone": r[5], "master_name": r[6], "duration": r[7],
+                "cancelled_at": r[8], "cancel_reason": r[9]}
+
+    active    = [_to_active(r)    for r in active_rows]
+    cancelled = [_to_cancelled(r) for r in cancelled_rows]
+
+    all_records = active + cancelled
+    latest      = max(all_records, key=lambda x: x["date"])
+    username    = uname_val if by_username else (active_rows[0][0] if active_rows else None)
+    if not by_username and active_rows:
+        with sqlite3.connect(DB_PATH) as conn:
+            urow = conn.execute(
+                "SELECT username FROM bookings WHERE phone IN (?,?) LIMIT 1", (p7, p8)
+            ).fetchone()
+            username = urow[0] if urow else None
+
+    return {
+        "name":      latest["name"],
+        "phone":     latest["phone"],
+        "username":  username,
+        "active":    active,
+        "cancelled": cancelled,
+    }
+
+def get_users_for_reengagement() -> list[dict]:
+    now       = datetime.now()
+    threshold = now.date() - timedelta(days=90)
+
+    with sqlite3.connect(DB_PATH) as conn:
+        rows      = conn.execute("SELECT user_id, date, time FROM bookings").fetchall()
+        sent_rows = conn.execute("SELECT user_id, sent_at FROM reengagement_log").fetchall()
+
+    sent: dict[int, datetime] = {}
+    for uid, sat in sent_rows:
+        try:
+            sent[uid] = datetime.strptime(sat, "%d.%m.%Y %H:%M")
+        except ValueError:
+            pass
+
+    user_dts: dict[int, list] = {}
+    for uid, dt, tm in rows:
+        try:
+            bdt = datetime.strptime(f"{dt} {tm}", "%d.%m.%Y %H:%M")
+        except ValueError:
+            continue
+        user_dts.setdefault(uid, []).append(bdt)
+
+    result = []
+    for uid, dts in user_dts.items():
+        if any(d > now for d in dts):
+            continue
+        if max(dts).date() > threshold:
+            continue
+        if uid in sent and (now - sent[uid]).days < 90:
+            continue
+        result.append({"user_id": uid})
+    return result
+
 def get_bookings_for_review() -> list[dict]:
     with sqlite3.connect(DB_PATH) as conn:
         rows = conn.execute("""
@@ -945,7 +1321,9 @@ def build_services_sel_keyboard(selected: set) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 def build_masters_kb(masters: list[dict]) -> ReplyKeyboardMarkup:
-    rows = [[KeyboardButton(text=m["name"])] for m in masters]
+    rows = []
+    for i in range(0, len(masters), 3):
+        rows.append([KeyboardButton(text=m["name"]) for m in masters[i:i+3]])
     rows.append([KeyboardButton(text="Назад")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
@@ -1005,10 +1383,16 @@ async def send_photo_with_text(msg: Message, path: Path, text: str):
         await msg.answer(text)
 
 async def notify_manager(bot: Bot, text: str):
-    try:
-        await bot.send_message(chat_id=MANAGER_CHAT_ID, text=text)
-    except Exception:
-        logging.exception("Ошибка уведомления менеджера")
+    for uid in get_active_manager_ids():
+        try:
+            await bot.send_message(chat_id=uid, text=text)
+        except Exception:
+            logging.exception("Ошибка уведомления менеджера %s", uid)
+    if get_notifications_enabled():
+        try:
+            await bot.send_message(chat_id=ADMIN_ID, text=text)
+        except Exception:
+            logging.exception("Ошибка уведомления администратора")
 
 async def reminder_loop(bot: Bot):
     while True:
@@ -1061,6 +1445,27 @@ async def review_loop(bot: Bot):
             except Exception:
                 logging.exception("Ошибка отправки запроса на отзыв")
         await asyncio.sleep(60)
+
+
+async def reengagement_loop(bot: Bot):
+    while True:
+        for u in get_users_for_reengagement():
+            try:
+                key = StorageKey(bot_id=bot.id, chat_id=u["user_id"], user_id=u["user_id"])
+                cur = await storage.get_state(key=key)
+                if cur is not None:
+                    continue
+                await bot.send_message(
+                    chat_id=u["user_id"],
+                    text="Давно не были в нашем салоне — мы соскучились! 💅\n\n"
+                         "Готовы предложить вам маникюр и педикюр от наших мастеров.\n"
+                         "Запишитесь прямо сейчас!",
+                    reply_markup=reengagement_promo_keyboard,
+                )
+                mark_reengagement_sent(u["user_id"])
+            except Exception:
+                logging.exception("Ошибка рассылки повторного визита")
+        await asyncio.sleep(3600)
 
 
 # ─── Client handlers ──────────────────────────────────────────────────────────
@@ -1128,13 +1533,13 @@ async def prices_handler(msg: Message, state: FSMContext):
     else:
         await send_photo_with_text(msg, PRICES_IMAGE, text)
 
+@dp.message(AdminState.admin_home, F.text == "💁‍♀️Мастера")
+async def admin_masters_home(msg: Message, state: FSMContext):
+    await state.set_state(AdminState.master_menu)
+    await msg.answer("Управление мастерами:", reply_markup=admin_masters_keyboard)
+
 @dp.message(F.text == "Мастера")
 async def masters_handler(msg: Message, state: FSMContext):
-    cur = await state.get_state()
-    if cur == AdminState.admin_home:
-        await state.set_state(AdminState.master_menu)
-        await msg.answer("Управление мастерами:", reply_markup=admin_masters_keyboard)
-        return
     if await _try_admin_info_select(msg, state):
         return
     active = get_active_masters()
@@ -1159,6 +1564,12 @@ async def contacts_handler(msg: Message, state: FSMContext):
 
 @dp.message(F.text == "Записаться")
 async def start_booking(msg: Message, state: FSMContext):
+    if is_client_blocked(msg.from_user.id, msg.from_user.username):
+        await msg.answer(
+            "Запись через бот недоступна. По вопросам обращайтесь к администратору.",
+            reply_markup=main_keyboard,
+        )
+        return
     await state.set_state(BookingState.choosing_service)
     await msg.answer("Выберите услугу:", reply_markup=build_client_services_keyboard())
 
@@ -1408,6 +1819,7 @@ async def confirm_single_cancel(msg: Message, state: FSMContext):
         await msg.answer("Запись не найдена.", reply_markup=main_keyboard)
         return
     svc,dt,tm,nm,ph,mn = row
+    archive_cancelled_booking(bid, "client")
     delete_booking_by_id(bid)
     asyncio.create_task(sheets_set_status(bid, "отменена"))
     await msg.answer("Запись отменена.", reply_markup=main_keyboard)
@@ -1432,6 +1844,7 @@ async def choose_booking_cancel(msg: Message, state: FSMContext):
         await msg.answer("Выберите кнопкой.")
         return
     b = bs[idx]
+    archive_cancelled_booking(b["id"], "client")
     delete_booking_by_id(b["id"])
     asyncio.create_task(sheets_set_status(b["id"], "отменена"))
     await state.clear()
@@ -1457,6 +1870,7 @@ async def cancel_visit(msg: Message):
     if not b:
         await msg.answer("Запись не найдена.", reply_markup=main_keyboard)
         return
+    archive_cancelled_booking(b["id"], "reminder")
     delete_booking_by_id(b["id"])
     asyncio.create_task(sheets_set_status(b["id"], "отменена"))
     await msg.answer("Запись отменена.", reply_markup=main_keyboard)
@@ -1466,6 +1880,7 @@ async def cancel_visit(msg: Message):
 async def reschedule(msg: Message, state: FSMContext):
     b = get_nearest_booking_for_user(msg.from_user.id)
     if b:
+        archive_cancelled_booking(b["id"], "reschedule")
         delete_booking_by_id(b["id"])
         asyncio.create_task(sheets_set_status(b["id"], "перезапись"))
         await notify_manager(msg.bot, f"Клиент перезаписывается.\n\nУслуга: {b['service']}\nМастер: {b['master_name']}\nДата: {b['date']}\nВремя: {b['time']}\nИмя: {b['name']}")
@@ -1477,31 +1892,31 @@ async def reschedule(msg: Message, state: FSMContext):
 
 @dp.message(Command("admin"))
 async def admin_entry(msg: Message, state: FSMContext):
-    if msg.from_user.id != MANAGER_CHAT_ID:
+    if not is_manager_or_admin(msg.from_user.id):
         return
     await state.set_state(AdminState.admin_home)
-    await msg.answer("Режим редактирования:", reply_markup=admin_keyboard)
+    await msg.answer("Режим редактирования:", reply_markup=admin_kb(msg.from_user.id))
 
-@dp.message(F.text == "Выйти из редактирования")
+@dp.message(F.text == "Выход из редактирования")
 async def admin_exit(msg: Message, state: FSMContext):
     await state.clear()
     await msg.answer("Вышли из редактирования.", reply_markup=main_keyboard)
 
 async def go_home(msg, state):
     await state.set_state(AdminState.admin_home)
-    await msg.answer("Главное меню:", reply_markup=admin_keyboard)
+    await msg.answer("Главное меню:", reply_markup=admin_kb(msg.from_user.id))
 
 async def go_masters(msg, state):
     await state.set_state(AdminState.master_menu)
     await msg.answer("Управление мастерами:", reply_markup=admin_masters_keyboard)
 
 # admin_home routes
-@dp.message(AdminState.admin_home, F.text == "Расписание салона")
+@dp.message(AdminState.admin_home, F.text == "📝Расписание салона")
 async def admin_salon_section(msg: Message, state: FSMContext):
     await state.set_state(AdminState.salon_menu)
     await msg.answer("Расписание салона:", reply_markup=admin_salon_keyboard)
 
-@dp.message(AdminState.admin_home, F.text == "Расписание записей")
+@dp.message(AdminState.admin_home, F.text == "🗓️Расписание записей")
 async def admin_schedule_section(msg: Message, state: FSMContext):
     await state.set_state(AdminState.schedule_view)
     await msg.answer("За какой период показать расписание?", reply_markup=schedule_period_keyboard)
@@ -1552,7 +1967,7 @@ async def schedule_view_handler(msg: Message, state: FSMContext):
 async def masters_back(msg: Message, state: FSMContext):
     await go_home(msg, state)
 
-@dp.message(AdminState.master_menu, F.text == "Список мастеров")
+@dp.message(AdminState.master_menu, F.text == "👯Список мастеров")
 async def masters_list(msg: Message, state: FSMContext):
     ms = get_all_masters()
     if not ms:
@@ -1568,7 +1983,7 @@ async def masters_list(msg: Message, state: FSMContext):
 
 # ── Внести мастера ──
 
-@dp.message(AdminState.master_menu, F.text == "Внести мастера")
+@dp.message(AdminState.master_menu, F.text == "🟢Внести мастера")
 async def add_master_start(msg: Message, state: FSMContext):
     await state.set_state(AdminState.adding_name)
     await msg.answer("Введите имя нового мастера:", reply_markup=back_keyboard)
@@ -1675,7 +2090,7 @@ async def _finish_add_master(msg, state, stype, w, o, sd):
 
 # ── Смотреть оценку ──
 
-@dp.message(AdminState.master_menu, F.text == "Смотреть оценку")
+@dp.message(AdminState.master_menu, F.text == "⭐Смотреть оценку")
 async def ratings_start(msg: Message, state: FSMContext):
     ms = get_all_masters()
     if not ms:
@@ -1729,7 +2144,7 @@ async def ratings_select(msg: Message, state: FSMContext):
 
 # ── Деактивировать ──
 
-@dp.message(AdminState.master_menu, F.text == "Деактивировать")
+@dp.message(AdminState.master_menu, F.text == "🔴Удалить")
 async def deact_start(msg: Message, state: FSMContext):
     ms = get_active_masters()
     if not ms:
@@ -1750,7 +2165,7 @@ async def deact_select(msg: Message, state: FSMContext):
         return
     await state.update_data(deact_id=sel["id"], deact_name=sel["name"])
     await state.set_state(AdminState.deactivating_confirm)
-    await msg.answer(f"Деактивировать мастера {sel['name']}?", reply_markup=yes_no_keyboard)
+    await msg.answer(f"Удалить мастера {sel['name']}?", reply_markup=yes_no_keyboard)
 
 @dp.message(AdminState.deactivating_confirm)
 async def deact_confirm(msg: Message, state: FSMContext):
@@ -1758,7 +2173,7 @@ async def deact_confirm(msg: Message, state: FSMContext):
     if msg.text == "Да":
         deactivate_master(data["deact_id"])
         await go_masters(msg, state)
-        await msg.answer(f"Мастер {data['deact_name']} деактивирован.")
+        await msg.answer(f"Мастер {data['deact_name']} удалён.")
     elif msg.text == "Нет":
         await go_masters(msg, state)
     else:
@@ -1767,7 +2182,7 @@ async def deact_confirm(msg: Message, state: FSMContext):
 
 # ── Редактировать ──
 
-@dp.message(AdminState.master_menu, F.text == "Редактировать")
+@dp.message(AdminState.master_menu, F.text == "🟡Редактировать")
 async def edit_start(msg: Message, state: FSMContext):
     ms = get_active_masters()
     if not ms:
@@ -2192,7 +2607,7 @@ async def review_comment_handler(msg: Message, state: FSMContext):
 
 # ─── Admin: Услуги ────────────────────────────────────────────────────────────
 
-@dp.message(AdminState.admin_home, F.text == "Услуги")
+@dp.message(AdminState.admin_home, F.text == "💅Услуги")
 async def admin_svc_section(msg: Message, state: FSMContext):
     await state.set_state(AdminState.svc_menu)
     await msg.answer("Управление услугами:", reply_markup=svc_menu_keyboard)
@@ -2388,7 +2803,7 @@ async def svc_edit_confirm_h(msg: Message, state: FSMContext):
 
 # ─── Admin: Информация о салоне ───────────────────────────────────────────────
 
-@dp.message(AdminState.admin_home, F.text == "Информация о салоне")
+@dp.message(AdminState.admin_home, F.text == "📄О салоне")
 async def admin_info_section(msg: Message, state: FSMContext):
     await state.set_state(AdminState.info_select)
     await msg.answer("Выберите раздел для редактирования:", reply_markup=info_sections_keyboard)
@@ -2445,13 +2860,501 @@ async def info_confirm_h(msg: Message, state: FSMContext):
         new_text = data.get("info_new_text") or page["text"]
         new_photo= data.get("info_new_photo") or page["photo_file_id"]
         save_info_page(data["info_section_key"], new_text, new_photo)
+        log_action(msg.from_user.id, msg.from_user.full_name, "info_edit", data["info_section_label"])
         await go_home(msg, state)
-        await msg.answer(f"Раздел «{data['info_section_label']}» обновлён.", reply_markup=admin_keyboard)
+        await msg.answer(f"Раздел «{data['info_section_label']}» обновлён.", reply_markup=admin_kb(msg.from_user.id))
     elif msg.text == "Нет":
         await go_home(msg, state)
-        await msg.answer("Отменено.", reply_markup=admin_keyboard)
+        await msg.answer("Отменено.", reply_markup=admin_kb(msg.from_user.id))
     else:
         await msg.answer("Да или Нет?", reply_markup=yes_no_keyboard)
+
+
+# ─── Admin: Блокировка клиентов ───────────────────────────────────────────────
+
+@dp.message(AdminState.admin_home, F.text == "⛔Блок пользователя")
+async def admin_block_section(msg: Message, state: FSMContext):
+    await state.set_state(AdminState.block_menu)
+    await msg.answer("Управление блокировками:", reply_markup=block_menu_keyboard)
+
+@dp.message(AdminState.block_menu)
+async def admin_block_menu_h(msg: Message, state: FSMContext):
+    if msg.text == "Назад":
+        await go_home(msg, state)
+        return
+    if msg.text == "Заблокировать клиента":
+        await state.set_state(AdminState.block_input)
+        await msg.answer(
+            "Введите номер телефона (8XXXXXXXXXX или +7XXXXXXXXXX)\nили @username клиента:",
+            reply_markup=back_keyboard,
+        )
+        return
+    if msg.text == "Заблокированные клиенты":
+        blocked = get_blocked_clients()
+        if not blocked:
+            await msg.answer("Нет заблокированных клиентов.", reply_markup=block_menu_keyboard)
+            return
+        await state.set_state(AdminState.blocked_list)
+        await state.update_data(blocked_clients=blocked)
+        rows = [
+            [KeyboardButton(text=f"{i}. {b['name'] or '—'} | {b['phone'] or b['username'] or '—'}")]
+            for i, b in enumerate(blocked, 1)
+        ]
+        rows.append([KeyboardButton(text="Назад")])
+        lines = ["Заблокированные клиенты:\n"]
+        for i, b in enumerate(blocked, 1):
+            ident = b["phone"] or (f"@{b['username']}" if b["username"] else "—")
+            lines.append(f"{i}. {b['name'] or '—'} | {ident} | с {b['blocked_at']}")
+        await msg.answer(
+            "\n".join(lines),
+            reply_markup=ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True),
+        )
+        return
+    await msg.answer("Выберите кнопкой.", reply_markup=block_menu_keyboard)
+
+@dp.message(AdminState.block_input)
+async def admin_block_input_h(msg: Message, state: FSMContext):
+    if msg.text == "Назад":
+        await state.set_state(AdminState.block_menu)
+        await msg.answer("Управление блокировками:", reply_markup=block_menu_keyboard)
+        return
+    identity = get_client_identity(msg.text.strip())
+    if identity:
+        await state.update_data(
+            block_user_id=identity["user_id"],
+            block_username=identity["username"],
+            block_phone=identity["phone"],
+            block_name=identity["name"],
+        )
+        phone_str   = identity["phone"] or "—"
+        uname_str   = f"@{identity['username']}" if identity["username"] else "—"
+        await msg.answer(
+            f"Заблокировать клиента?\n\n"
+            f"Имя: {identity['name']}\n"
+            f"Телефон: {phone_str}\n"
+            f"Telegram: {uname_str}",
+            reply_markup=yes_no_keyboard,
+        )
+    else:
+        q = msg.text.strip()
+        uname = q[1:] if q.startswith("@") else (None if is_valid_phone(q) else q)
+        phone = normalize_phone(q) if is_valid_phone(q) else None
+        await state.update_data(
+            block_user_id=None,
+            block_username=uname,
+            block_phone=phone,
+            block_name=None,
+        )
+        ident_str = f"@{uname}" if uname else phone
+        await msg.answer(
+            f"Клиент не найден в истории записей.\n"
+            f"Всё равно заблокировать {ident_str}?",
+            reply_markup=yes_no_keyboard,
+        )
+    await state.set_state(AdminState.block_confirm)
+
+@dp.message(AdminState.block_confirm)
+async def admin_block_confirm_h(msg: Message, state: FSMContext):
+    if msg.text == "Нет":
+        await state.set_state(AdminState.block_menu)
+        await msg.answer("Отменено.", reply_markup=block_menu_keyboard)
+        return
+    if msg.text != "Да":
+        await msg.answer("Нажмите «Да» или «Нет».", reply_markup=yes_no_keyboard)
+        return
+    data = await state.get_data()
+    block_client(
+        data.get("block_user_id"),
+        data.get("block_username"),
+        data.get("block_phone"),
+        data.get("block_name"),
+    )
+    await state.set_state(AdminState.block_menu)
+    name_str  = data.get("block_name") or data.get("block_phone") or data.get("block_username") or "клиент"
+    phone_str = data.get("block_phone") or data.get("block_username") or ""
+    log_action(msg.from_user.id, msg.from_user.full_name, "block", f"{name_str} ({phone_str})")
+    await msg.answer(f"✅ {name_str} заблокирован. Запись через бот недоступна.", reply_markup=block_menu_keyboard)
+
+@dp.message(AdminState.blocked_list)
+async def admin_blocked_list_h(msg: Message, state: FSMContext):
+    if msg.text == "Назад":
+        await state.set_state(AdminState.block_menu)
+        await msg.answer("Управление блокировками:", reply_markup=block_menu_keyboard)
+        return
+    data    = await state.get_data()
+    blocked = data.get("blocked_clients", [])
+    idx     = None
+    t       = msg.text or ""
+    if t and t[0].isdigit():
+        dp_ = t.find(".")
+        if dp_ != -1:
+            try:
+                idx = int(t[:dp_]) - 1
+            except ValueError:
+                pass
+    if idx is None or not (0 <= idx < len(blocked)):
+        await msg.answer("Выберите кнопкой.")
+        return
+    sel = blocked[idx]
+    await state.update_data(unblock_id=sel["id"], unblock_name=sel["name"])
+    name_str  = sel["name"] or "—"
+    ident_str = sel["phone"] or (f"@{sel['username']}" if sel["username"] else "—")
+    await state.set_state(AdminState.unblock_confirm)
+    await msg.answer(
+        f"Разблокировать клиента?\n\nИмя: {name_str}\n{ident_str}",
+        reply_markup=yes_no_keyboard,
+    )
+
+@dp.message(AdminState.unblock_confirm)
+async def admin_unblock_confirm_h(msg: Message, state: FSMContext):
+    if msg.text == "Нет":
+        await state.set_state(AdminState.block_menu)
+        await msg.answer("Отменено.", reply_markup=block_menu_keyboard)
+        return
+    if msg.text != "Да":
+        await msg.answer("Нажмите «Да» или «Нет».", reply_markup=yes_no_keyboard)
+        return
+    data = await state.get_data()
+    unblock_client(data["unblock_id"])
+    name_str = data.get("unblock_name") or "Клиент"
+    log_action(msg.from_user.id, msg.from_user.full_name, "unblock", name_str)
+    await state.set_state(AdminState.block_menu)
+    await msg.answer(f"✅ {name_str} разблокирован.", reply_markup=block_menu_keyboard)
+
+
+# ─── Admin: Поиск по клиенту ──────────────────────────────────────────────────
+
+def _build_client_history_html(result: dict) -> str:
+    name   = he(result["name"])
+    phone  = he(normalize_phone(result["phone"]))
+    uname  = f"@{he(result['username'])}" if result["username"] else "—"
+    active_count = len(result["active"])
+    total        = active_count + len(result["cancelled"])
+    badge        = he(loyalty_badge(active_count))
+
+    lines = [
+        f"<b>Клиент: {name}{badge}</b>",
+        f"Телефон: {phone}",
+        f"Telegram: {uname}",
+        f"Всего визитов: {total}",
+    ]
+
+    if result["active"]:
+        lines.append("\n<b>Записи (активные и прошедшие):</b>")
+        for b in sorted(result["active"], key=lambda x: (x["date"], x["time"])):
+            dur = " (2ч)" if b["duration"] >= 2 else ""
+            lines.append(
+                f"  {he(b['date'])} {he(b['time'])} — {he(b['service'])}{dur}\n"
+                f"  Мастер: {he(b['master_name'])}"
+            )
+
+    if result["cancelled"]:
+        reason_map = {
+            "client":    "клиент",
+            "reminder":  "через напоминание",
+            "reschedule": "перезапись",
+        }
+        lines.append("\n<b>Отменённые записи:</b>")
+        for b in sorted(result["cancelled"], key=lambda x: (x["date"], x["time"]), reverse=True):
+            dur    = " (2ч)" if b["duration"] >= 2 else ""
+            reason = reason_map.get(b["cancel_reason"], he(b["cancel_reason"]))
+            lines.append(
+                f"  {he(b['date'])} {he(b['time'])} — {he(b['service'])}{dur}\n"
+                f"  Мастер: {he(b['master_name'])} | Отменена: {he(b['cancelled_at'])} ({reason})"
+            )
+
+    return "\n".join(lines)
+
+
+@dp.message(AdminState.admin_home, F.text == "🔍Поиск по клиенту")
+async def admin_client_search_start(msg: Message, state: FSMContext):
+    await state.set_state(AdminState.client_search_input)
+    await msg.answer(
+        "Введите номер телефона клиента (8XXXXXXXXXX или +7XXXXXXXXXX)\n"
+        "или @username:",
+        reply_markup=back_keyboard,
+    )
+
+@dp.message(AdminState.client_search_input)
+async def admin_client_search_handler(msg: Message, state: FSMContext):
+    if msg.text == "Назад":
+        await go_home(msg, state)
+        return
+    result = get_client_history(msg.text.strip())
+    if not result:
+        await msg.answer(
+            "Клиент не найден. Проверьте номер или @username.",
+            reply_markup=back_keyboard,
+        )
+        return
+    html = _build_client_history_html(result)
+    await msg.answer(
+        f"<blockquote expandable>{html}</blockquote>",
+        parse_mode="HTML",
+        reply_markup=back_keyboard,
+    )
+
+
+# ─── Admin: Рассылка объявлений ───────────────────────────────────────────────
+
+@dp.message(AdminState.admin_home, F.text == "✏️Создать объявление")
+async def broadcast_start(msg: Message, state: FSMContext):
+    await state.set_state(AdminState.broadcast_text)
+    await msg.answer("Введите текст объявления:", reply_markup=back_keyboard)
+
+@dp.message(AdminState.broadcast_text)
+async def broadcast_text_h(msg: Message, state: FSMContext):
+    if msg.text == "Назад":
+        await go_home(msg, state)
+        return
+    await state.update_data(broadcast_text=msg.text.strip())
+    await state.set_state(AdminState.broadcast_media)
+    await msg.answer(
+        "Прикрепите фото или видео к объявлению.\n"
+        "Или нажмите «Без медиафайла».",
+        reply_markup=broadcast_media_keyboard,
+    )
+
+@dp.message(AdminState.broadcast_media)
+async def broadcast_media_h(msg: Message, state: FSMContext):
+    if msg.text == "Назад":
+        await state.set_state(AdminState.broadcast_text)
+        await msg.answer("Введите текст объявления:", reply_markup=back_keyboard)
+        return
+
+    if msg.photo:
+        await state.update_data(broadcast_media_type="photo", broadcast_media_id=msg.photo[-1].file_id)
+    elif msg.video:
+        await state.update_data(broadcast_media_type="video", broadcast_media_id=msg.video.file_id)
+    elif msg.text == "Без медиафайла":
+        await state.update_data(broadcast_media_type=None, broadcast_media_id=None)
+    else:
+        await msg.answer("Отправьте фото, видео или нажмите «Без медиафайла».",
+                         reply_markup=broadcast_media_keyboard)
+        return
+
+    with sqlite3.connect(DB_PATH) as conn:
+        count = conn.execute("SELECT COUNT(DISTINCT user_id) FROM bookings").fetchone()[0]
+
+    data        = await state.get_data()
+    media_label = "с медиафайлом" if data.get("broadcast_media_type") else "без медиафайла"
+    await state.set_state(AdminState.broadcast_confirm)
+    await msg.answer(
+        f"Объявление ({media_label}) будет отправлено {count} пользователям.\n\n"
+        f"Текст:\n{data['broadcast_text']}\n\n"
+        "Отправить?",
+        reply_markup=yes_no_keyboard,
+    )
+
+@dp.message(AdminState.broadcast_confirm)
+async def broadcast_confirm_h(msg: Message, state: FSMContext):
+    if msg.text == "Нет":
+        await go_home(msg, state)
+        await msg.answer("Объявление отменено.")
+        return
+    if msg.text != "Да":
+        await msg.answer("Нажмите «Да» или «Нет».", reply_markup=yes_no_keyboard)
+        return
+
+    data       = await state.get_data()
+    text       = data["broadcast_text"]
+    media_type = data.get("broadcast_media_type")
+    media_id   = data.get("broadcast_media_id")
+
+    with sqlite3.connect(DB_PATH) as conn:
+        user_ids = [r[0] for r in conn.execute("SELECT DISTINCT user_id FROM bookings").fetchall()]
+
+    log_action(msg.from_user.id, msg.from_user.full_name, "broadcast", text[:60])
+    await go_home(msg, state)
+    await msg.answer(f"Начинаю рассылку {len(user_ids)} пользователям…")
+
+    sent, failed = 0, 0
+    for uid in user_ids:
+        try:
+            if media_type == "photo":
+                await msg.bot.send_photo(chat_id=uid, photo=media_id, caption=text)
+            elif media_type == "video":
+                await msg.bot.send_video(chat_id=uid, video=media_id, caption=text)
+            else:
+                await msg.bot.send_message(chat_id=uid, text=text)
+            sent += 1
+        except Exception:
+            failed += 1
+        await asyncio.sleep(0.05)
+
+    await msg.bot.send_message(
+        chat_id=msg.from_user.id,
+        text=f"Рассылка завершена.\n✅ Доставлено: {sent}\n❌ Ошибок: {failed}",
+        reply_markup=admin_kb(msg.from_user.id),
+    )
+
+
+# ─── Admin: Уведомления (только для администратора) ──────────────────────────
+
+@dp.message(AdminState.admin_home, F.text == "Уведомления")
+async def admin_notifications_toggle(msg: Message, state: FSMContext):
+    if not is_admin(msg.from_user.id):
+        return
+    new_val = toggle_notifications()
+    status  = "включены ✅" if new_val else "отключены 🔕"
+    await msg.answer(f"Уведомления о записях {status}.", reply_markup=admin_super_keyboard)
+
+
+# ─── Admin: Менеджеры (только для администратора) ─────────────────────────────
+
+@dp.message(AdminState.admin_home, F.text == "Менеджеры")
+async def admin_managers_section(msg: Message, state: FSMContext):
+    if not is_admin(msg.from_user.id):
+        return
+    await state.set_state(AdminState.managers_menu)
+    await msg.answer("Управление менеджерами:", reply_markup=managers_menu_keyboard)
+
+
+@dp.message(AdminState.managers_menu)
+async def admin_managers_menu_h(msg: Message, state: FSMContext):
+    if msg.text == "Назад":
+        await go_home(msg, state)
+        return
+
+    if msg.text == "Добавить менеджера":
+        await state.set_state(AdminState.manager_add_input)
+        await msg.answer(
+            "Введите Telegram ID и имя менеджера через пробел.\n"
+            "Пример: <code>123456789 Иван</code>\n\n"
+            "Telegram ID можно узнать через @userinfobot.",
+            parse_mode="HTML",
+        )
+        return
+
+    if msg.text == "Список менеджеров":
+        managers = get_all_managers()
+        if not managers:
+            await msg.answer("Менеджеров нет.", reply_markup=managers_menu_keyboard)
+            return
+        lines = []
+        buttons = []
+        for i, m in enumerate(managers, 1):
+            status = "активен" if m["is_active"] else "деактивирован"
+            lines.append(f"{i}. {he(m['name'])} ({status}) [{m['user_id']}]")
+            if m["is_active"]:
+                buttons.append([KeyboardButton(text=f"{i}. {m['name']}")])
+        buttons.append([KeyboardButton(text="Назад")])
+        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+        await state.update_data(managers_list=managers)
+        await state.set_state(AdminState.manager_deactivate_select)
+        text_out = "\n".join(lines) + "\n\nВыберите активного менеджера для деактивации:"
+        await msg.answer(text_out, reply_markup=kb)
+        return
+
+    if msg.text == "Лог действий":
+        logs = get_action_log(50)
+        if not logs:
+            await msg.answer("Лог пуст.", reply_markup=managers_menu_keyboard)
+            await state.set_state(AdminState.manager_log_view)
+            return
+        lines = []
+        for entry in logs:
+            action_map = {
+                "block":     "Заблокировал клиента",
+                "unblock":   "Разблокировал клиента",
+                "info_edit": "Редактировал инфо-страницу",
+                "broadcast": "Отправил объявление",
+            }
+            action_label = action_map.get(entry["action"], entry["action"])
+            detail = f": {he(entry['details'])}" if entry["details"] else ""
+            lines.append(f"{he(entry['logged_at'])} — {he(entry['manager_name'])}\n  {action_label}{detail}")
+        body = "\n\n".join(lines)
+        log_kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Назад")]], resize_keyboard=True)
+        await state.set_state(AdminState.manager_log_view)
+        await msg.answer(
+            f"<blockquote expandable>{body}</blockquote>",
+            parse_mode="HTML",
+            reply_markup=log_kb,
+        )
+        return
+
+    await msg.answer("Выберите действие кнопкой.", reply_markup=managers_menu_keyboard)
+
+
+@dp.message(AdminState.manager_add_input)
+async def admin_manager_add_h(msg: Message, state: FSMContext):
+    if msg.text == "Назад":
+        await state.set_state(AdminState.managers_menu)
+        await msg.answer("Управление менеджерами:", reply_markup=managers_menu_keyboard)
+        return
+    parts = (msg.text or "").strip().split(None, 1)
+    if len(parts) < 2 or not parts[0].isdigit():
+        await msg.answer(
+            "Неверный формат. Введите: <code>TelegramID Имя</code>\nПример: <code>123456789 Иван</code>",
+            parse_mode="HTML",
+        )
+        return
+    new_uid  = int(parts[0])
+    new_name = parts[1].strip()
+    if new_uid == ADMIN_ID:
+        await msg.answer("Это ID администратора, добавлять не нужно.")
+        return
+    existing = [m for m in get_all_managers() if m["user_id"] == new_uid and m["is_active"]]
+    if existing:
+        await msg.answer(f"Менеджер с ID {new_uid} уже активен.", reply_markup=managers_menu_keyboard)
+        await state.set_state(AdminState.managers_menu)
+        return
+    add_manager(new_uid, new_name)
+    await state.set_state(AdminState.managers_menu)
+    await msg.answer(f"✅ Менеджер {he(new_name)} ({new_uid}) добавлен.", reply_markup=managers_menu_keyboard)
+
+
+@dp.message(AdminState.manager_deactivate_select)
+async def admin_manager_deact_select_h(msg: Message, state: FSMContext):
+    if msg.text == "Назад":
+        await state.set_state(AdminState.managers_menu)
+        await msg.answer("Управление менеджерами:", reply_markup=managers_menu_keyboard)
+        return
+    data     = await state.get_data()
+    managers = data.get("managers_list", [])
+    idx      = None
+    t        = msg.text or ""
+    if t and t[0].isdigit():
+        dp_ = t.find(".")
+        if dp_ != -1:
+            try:
+                idx = int(t[:dp_]) - 1
+            except ValueError:
+                pass
+    if idx is None or not (0 <= idx < len(managers)):
+        await msg.answer("Выберите кнопкой.")
+        return
+    sel = managers[idx]
+    if not sel["is_active"]:
+        await msg.answer("Этот менеджер уже деактивирован.")
+        return
+    await state.update_data(deact_manager_id=sel["id"], deact_manager_name=sel["name"])
+    await state.set_state(AdminState.manager_deactivate_confirm)
+    await msg.answer(
+        f"Деактивировать менеджера {he(sel['name'])} (ID {sel['user_id']})?",
+        reply_markup=yes_no_keyboard,
+    )
+
+
+@dp.message(AdminState.manager_deactivate_confirm)
+async def admin_manager_deact_confirm_h(msg: Message, state: FSMContext):
+    if msg.text == "Нет":
+        await state.set_state(AdminState.managers_menu)
+        await msg.answer("Отменено.", reply_markup=managers_menu_keyboard)
+        return
+    if msg.text != "Да":
+        await msg.answer("Нажмите «Да» или «Нет».", reply_markup=yes_no_keyboard)
+        return
+    data = await state.get_data()
+    deactivate_manager(data["deact_manager_id"])
+    await state.set_state(AdminState.managers_menu)
+    await msg.answer(f"✅ Менеджер {he(data['deact_manager_name'])} деактивирован.", reply_markup=managers_menu_keyboard)
+
+
+@dp.message(AdminState.manager_log_view)
+async def admin_manager_log_view_h(msg: Message, state: FSMContext):
+    await state.set_state(AdminState.managers_menu)
+    await msg.answer("Управление менеджерами:", reply_markup=managers_menu_keyboard)
 
 
 # ─── Fallback ──────────────────────────────────────────────────────────────────
@@ -2471,6 +3374,7 @@ async def main():
     bot = Bot(token=TOKEN)
     asyncio.create_task(reminder_loop(bot))
     asyncio.create_task(review_loop(bot))
+    asyncio.create_task(reengagement_loop(bot))
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
